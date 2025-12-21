@@ -392,7 +392,7 @@ app.event('message', async ({ event, client, logger }) => {
     await client.chat.postMessage({
         channel: event.channel,
         thread_ts: event.ts,
-        text: `:wave-pikachu-2: Thank you for creating a ticket! Someone will help you soon. Make sure to read the <https://hackclub.slack.com/docs/T0266FRGM/F08NW544FMM|Faq> to see if it answers your question!`
+        text: `:rac_woah: woah... a new ticket?? someone will be here to help you soon... make sure to read the <https://hackclub.enterprise.slack.com/docs/T0266FRGM/F09LT3JBG3C|FAQ> to see if it answers your question!`
     })
 });
 
