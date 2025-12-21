@@ -31,19 +31,27 @@ interface LBEntry {
     slack_id: string;
     count_of_tickets: number;
 }
+
+interface TicketResolution {
+    resolver: string;
+    timestamp: number; // Unix timestamp in ms
+}
+
 const tickets: Record<string, TicketInfo> = {};
 // Additional map to quickly look up tickets by original message timestamp
 const ticketsByOriginalTs: Record<string, string> = {};
 
-// evan this concerns me, why are we saving data in json :heavysob:
-let lbForToday: LBEntry[] = []
+// Historical tracking for leaderboards
+let lbForToday: LBEntry[] = [];
+let ticketResolutions: TicketResolution[] = [];
 // Function to save ticket data to a file
 async function saveTicketData() {
     try {
         const data = {
             tickets,
             ticketsByOriginalTs,
-            lbForToday
+            lbForToday,
+            ticketResolutions
         };
         await fs.writeJSON(DATA_FILE_PATH, data, { spaces: 2 });
         console.log('Ticket data saved to file');
@@ -61,7 +69,8 @@ async function loadTicketData() {
             // Clear existing data first
             Object.keys(tickets).forEach(key => delete tickets[key]);
             Object.keys(ticketsByOriginalTs).forEach(key => delete ticketsByOriginalTs[key]);
-            lbForToday = []
+            lbForToday = [];
+            ticketResolutions = [];
             // Load data from file
             if (data.tickets) {
                 Object.assign(tickets, data.tickets);
@@ -70,7 +79,10 @@ async function loadTicketData() {
                 Object.assign(ticketsByOriginalTs, data.ticketsByOriginalTs);
             }
             if (data.lbForToday) {
-                lbForToday = data.lbForToday
+                lbForToday = data.lbForToday;
+            }
+            if (data.ticketResolutions) {
+                ticketResolutions = data.ticketResolutions;
             }
 
             console.log(`Loaded ${Object.keys(tickets).length} tickets from file`);
@@ -333,7 +345,14 @@ async function resolveTicket(ticketTs: string, resolver: string, client, logger,
         // Clean up our records
         delete ticketsByOriginalTs[ticket.originalTs];
         delete tickets[ticketTs];
-        const newEntry = Array.from(lbForToday)
+        
+        // Track resolution for leaderboards
+        ticketResolutions.push({
+            resolver,
+            timestamp: Date.now()
+        });
+        
+        const newEntry = Array.from(lbForToday);
         const existingEntryIndex = newEntry.findIndex(e => e.slack_id === resolver);
         if (existingEntryIndex !== -1) {
             newEntry[existingEntryIndex].count_of_tickets += 1;
@@ -343,7 +362,7 @@ async function resolveTicket(ticketTs: string, resolver: string, client, logger,
                 count_of_tickets: 1
             });
         }
-        lbForToday = newEntry; // Assign the updated array back
+        lbForToday = newEntry;
         // Save ticket data after resolving a ticket
         await saveTicketData();
 
@@ -373,7 +392,7 @@ app.event('message', async ({ event, client, logger }) => {
     await client.chat.postMessage({
         channel: event.channel,
         thread_ts: event.ts,
-        text: `:wave-pikachu-2: Hey there, thanks for making a ticket! Someone will be here to help you soon. Make sure to read the <https://hackclub.enterprise.slack.com/docs/T0266FRGM/F09LT3JBG3C|FAQ> to see if it answers your question!`
+        text: `:wave-pikachu-2: Thank you for creating a ticket! Someone will help you soon. Make sure to read the <https://hackclub.slack.com/docs/T0266FRGM/F08NW544FMM|Faq> to see if it answers your question!`
     })
 });
 
@@ -540,6 +559,222 @@ async function sendLB() {
     lbForToday = []
     saveTicketData()
 }
+
+// Helper functions for leaderboard calculations
+function getLeaderboard(resolutions: TicketResolution[], since?: number): { userId: string; count: number }[] {
+    const filtered = since 
+        ? resolutions.filter(r => r.timestamp >= since)
+        : resolutions;
+    
+    const counts: Record<string, number> = {};
+    for (const r of filtered) {
+        counts[r.resolver] = (counts[r.resolver] || 0) + 1;
+    }
+    
+    return Object.entries(counts)
+        .map(([userId, count]) => ({ userId, count }))
+        .sort((a, b) => b.count - a.count);
+}
+
+function getStartOfToday(): number {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+}
+
+function getStartOf7DaysAgo(): number {
+    return Date.now() - (7 * 24 * 60 * 60 * 1000);
+}
+
+// App Home handler - only shows to members of the staff channel
+const STAFF_HOME_CHANNEL = 'C0A4VNM716J';
+
+app.event('app_home_opened', async ({ event, client, logger }) => {
+    try {
+        // Check if user is a member of the staff channel
+        let isStaffMember = false;
+        try {
+            const membersResult = await client.conversations.members({
+                channel: STAFF_HOME_CHANNEL
+            });
+            isStaffMember = membersResult.members?.includes(event.user) || false;
+        } catch (e) {
+            logger.warn('Failed to check staff channel membership');
+        }
+
+        // Show restricted view for non-staff
+        if (!isStaffMember) {
+            await client.views.publish({
+                user_id: event.user,
+                view: {
+                    type: "home",
+                    blocks: [
+                        {
+                            type: "header",
+                            text: {
+                                type: "plain_text",
+                                text: "heidi, the dealer"
+                            }
+                        },
+                        {
+                            type: "section",
+                            text: {
+                                type: "mrkdwn",
+                                text: "there's no tickets here, because you aren't a helper! huzzah, no stress!! :huzzah:",
+                                emoji: true
+                            }
+                        }
+                    ]
+                }
+            });
+            return;
+        }
+
+        const todayLeaderboard = getLeaderboard(ticketResolutions, getStartOfToday());
+        const weekLeaderboard = getLeaderboard(ticketResolutions, getStartOf7DaysAgo());
+        const allTimeLeaderboard = getLeaderboard(ticketResolutions);
+        
+        const unclaimed = Object.values(tickets).filter(t => t.claimers.length === 0);
+        
+        // Fetch a random cat image
+        let catImageUrl = 'https://cataas.com/cat';
+        try {
+            const catResponse = await fetch('https://cataas.com/cat?json=true');
+            if (catResponse.ok) {
+                const catData = await catResponse.json() as { _id: string };
+                catImageUrl = `https://cataas.com/cat/${catData._id}`;
+            }
+        } catch (e) {
+            logger.warn('Failed to fetch cat image, using default');
+        }
+        
+        const formatLeader = (lb: { userId: string; count: number }[], emoji: string) => {
+            if (lb.length === 0) return '_No one yet!_';
+            const top = lb[0]!;
+            return `${emoji} <@${top.userId}> with *${top.count}* ticket${top.count === 1 ? '' : 's'}`;
+        };
+        
+        const formatTop5 = (lb: { userId: string; count: number }[]) => {
+            if (lb.length === 0) return '_No resolutions yet_';
+            return lb.slice(0, 5)
+                .map((entry, i) => `${i + 1}. <@${entry.userId}> - ${entry.count}`)
+                .join('\n');
+        };
+
+        const blocks: any[] = [
+            {
+                type: "header",
+                text: {
+                    type: "plain_text",
+                    text: "heidi, the dealer",
+                    emoji: true
+                }
+            },
+            {
+                type: "section",
+                text: {
+                    type: "mrkdwn",
+                    text: "welcome to the poker table, here's what's happening"
+                }
+            },
+            { type: "divider" },
+            {
+                type: "header",
+                text: {
+                    type: "plain_text",
+                    text: "leaderboard",
+                    emoji: true
+                }
+            },
+            {
+                type: "section",
+                text: {
+                    type: "mrkdwn",
+                    text: `*most solved tickets today:*\n${formatLeader(todayLeaderboard, '🎯')}`
+                }
+            },
+            {
+                type: "section",
+                text: {
+                    type: "mrkdwn",
+                    text: `*most solved tickets in past 7d:*\n${formatLeader(weekLeaderboard, '🔥')}`
+                }
+            },
+            {
+                type: "section",
+                text: {
+                    type: "mrkdwn",
+                    text: `*most solved tickets (all time):*\n${formatLeader(allTimeLeaderboard, '👑')}`
+                }
+            },
+            { type: "divider" },
+            {
+                type: "header",
+                text: {
+                    type: "plain_text",
+                    text: "top 5 of all time",
+                    emoji: true
+                }
+            },
+            {
+                type: "section",
+                text: {
+                    type: "mrkdwn",
+                    text: formatTop5(allTimeLeaderboard)
+                }
+            },
+            { type: "divider" },
+            {
+                type: "header",
+                text: {
+                    type: "plain_text",
+                    text: `unclaimed tickets: (${unclaimed.length})`,
+                    emoji: true
+                }
+            }
+        ];
+
+        if (unclaimed.length === 0) {
+            blocks.push({
+                type: "section",
+                text: {
+                    type: "mrkdwn",
+                    text: "all tickets are claimed! yay :3"
+                }
+            });
+        } else {
+            const ticketList = unclaimed.slice(0, 10).map(t => 
+                `• <https://${process.env.SLACK_WORKSPACE_DOMAIN || 'yourworkspace.slack.com'}.slack.com/archives/${t.originalChannel}/p${formatTs(t.originalTs)}|poke at ticket>`
+            ).join('\n');
+            
+            blocks.push({
+                type: "section",
+                text: {
+                    type: "mrkdwn",
+                    text: ticketList + (unclaimed.length > 10 ? `\n_...and ${unclaimed.length - 10} more_` : '')
+                }
+            });
+        }
+
+        blocks.push(
+            { type: "divider" },
+            {
+                type: "image",
+                image_url: catImageUrl,
+                alt_text: "meow :3"
+            }
+        );
+
+        await client.views.publish({
+            user_id: event.user,
+            view: {
+                type: "home",
+                blocks
+            }
+        });
+    } catch (error) {
+        logger.error("Error publishing App Home:", error);
+    }
+});
 
 // Start the app
 (async () => {
