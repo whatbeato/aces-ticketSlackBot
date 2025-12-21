@@ -1,11 +1,10 @@
 {
-  "name": "shipwrecked-ai",
+  "name": "shipwrecked-tickets",
   "private": true,
   "main": "index.js",
   "description": "",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "prestart": "npx drizzle-kit push",
     "start": "npm install; npx tsx ./src/index.ts"
   },
   "author": "",
@@ -13,20 +12,13 @@
   "devDependencies": {
     "@types/fs-extra": "^11.0.4",
     "@types/node": "^22.5.5",
-    "@types/pg": "^8.11.13",
-    "drizzle-kit": "^0.31.0"
+    "typescript": "^5.6.2"
   },
   "dependencies": {
     "@slack/bolt": "^4.2.1",
     "@slack/web-api": "^7.9.1",
-    "date-fns": "^4.1.0",
     "dotenv": "^16.5.0",
-    "drizzle-orm": "^0.42.0",
     "fs-extra": "^11.2.0",
-    "openai": "^4.96.0",
-    "pg": "^8.15.2",
-    "ts-node": "^10.9.2",
-    "tsx": "^4.19.1",
-    "typescript": "^5.6.2"
+    "tsx": "^4.19.1"
   }
 }
