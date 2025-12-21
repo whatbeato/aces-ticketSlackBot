@@ -636,7 +636,7 @@ app.event('app_home_opened', async ({ event, client, logger }) => {
         const unclaimed = Object.values(tickets).filter(t => t.claimers.length === 0);
         
         // Fetch a random cat image
-        let catImageUrl = 'https://cataas.com/cat';
+        let catImageUrl: string | null = null;
         try {
             const catResponse = await fetch('https://cataas.com/cat?json=true');
             if (catResponse.ok) {
@@ -644,7 +644,7 @@ app.event('app_home_opened', async ({ event, client, logger }) => {
                 catImageUrl = `https://cataas.com/cat/${catData._id}`;
             }
         } catch (e) {
-            logger.warn('Failed to fetch cat image, using default');
+            logger.warn('Failed to fetch cat image, skipping image block');
         }
         
         const formatLeader = (lb: { userId: string; count: number }[], emoji: string) => {
@@ -755,14 +755,17 @@ app.event('app_home_opened', async ({ event, client, logger }) => {
             });
         }
 
-        blocks.push(
-            { type: "divider" },
-            {
-                type: "image",
-                image_url: catImageUrl,
-                alt_text: "meow :3"
-            }
-        );
+        // Only add cat image if we successfully fetched one
+        if (catImageUrl) {
+            blocks.push(
+                { type: "divider" },
+                {
+                    type: "image",
+                    image_url: catImageUrl,
+                    alt_text: "meow :3"
+                }
+            );
+        }
 
         await client.views.publish({
             user_id: event.user,
