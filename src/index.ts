@@ -420,7 +420,8 @@ app.event('message', async ({ event, client, logger }) => {
     await client.chat.postMessage({
         channel: event.channel,
         thread_ts: event.ts,
-        text: `if you have discovered the solution to your issue, react with a :white_tick: (white_tick) to mark it as solved!`
+        text: `if you have discovered the solution to your issue, react with a :white_tick: (white_tick) to mark it as solved!`,
+        emoji: true
     })
 });
 
