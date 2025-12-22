@@ -309,8 +309,13 @@ async function markTicketAsNotSure(userId: string, ticketTs: string, client, log
 // Function to resolve (delete) a ticket
 async function resolveTicket(ticketTs: string, resolver: string, client, logger, ai: boolean = false) {
     try {
+        logger.info(`[resolveTicket] Starting resolution for ticket ${ticketTs} by ${resolver}`);
         const ticket = getTicketByTicketTs(ticketTs);
-        if (!ticket) return false;
+        if (!ticket) {
+            logger.error(`[resolveTicket] Ticket ${ticketTs} not found in tickets map`);
+            return false;
+        }
+        logger.info(`[resolveTicket] Found ticket: originalChannel=${ticket.originalChannel}, originalTs=${ticket.originalTs}`);
         // Check if the original message still exists before resolving
         try {
             const originalMessageCheck = await client.conversations.history({
@@ -325,11 +330,15 @@ async function resolveTicket(ticketTs: string, resolver: string, client, logger,
                 logger.warn(`Original message for ticket ${ticketTs} no longer exists or is inaccessible. Proceeding with ticket resolution.`);
             } else {
                 // Reply to the original thread to notify the user
-                await client.chat.postMessage({
-                    channel: ticket.originalChannel,
-                    thread_ts: ticket.originalTs,
-                    text: `:white_check_mark: This ticket has been marked as resolved. Please send a new message in <#${HELP_CHANNEL}> to create a new ticket if you have another question. ${ai ? "" : "You're welcome to continue asking follow-up questions in this thread!"}`
-                });
+                try {
+                    await client.chat.postMessage({
+                        channel: ticket.originalChannel,
+                        thread_ts: ticket.originalTs,
+                        text: `:white_check_mark: This ticket has been marked as resolved. Please send a new message in <#${HELP_CHANNEL}> to create a new ticket if you have another question. ${ai ? "" : "You're welcome to continue asking follow-up questions in this thread!"}`
+                    });
+                } catch (postError) {
+                    logger.warn(`Failed to post resolution message:`, postError);
+                }
                 
                 // Add a checkmark reaction to the original message
                 try {
@@ -338,8 +347,8 @@ async function resolveTicket(ticketTs: string, resolver: string, client, logger,
                         timestamp: ticket.originalTs,
                         channel: ticket.originalChannel,
                     });
-                } catch (error) {
-                    logger.warn(`Failed to add reaction to original message:`, error);
+                } catch (reactionError) {
+                    logger.warn(`Failed to add reaction to original message:`, reactionError);
                 }
             }
         } catch (error) {
@@ -348,14 +357,17 @@ async function resolveTicket(ticketTs: string, resolver: string, client, logger,
         }
 
         // Delete the ticket message from the tickets channel
+        logger.info(`[resolveTicket] Deleting ticket message from tickets channel`);
         await client.chat.delete({
             channel: TICKETS_CHANNEL,
             ts: ticketTs
         });
+        logger.info(`[resolveTicket] Ticket message deleted successfully`);
 
         // Clean up our records
         delete ticketsByOriginalTs[ticket.originalTs];
         delete tickets[ticketTs];
+        logger.info(`[resolveTicket] Cleaned up ticket records`);
         
         // Track resolution for leaderboards
         ticketResolutions.push({
@@ -442,19 +454,31 @@ app.event('message', async ({ event, client, logger }) => {
 app.action('mark_resolved', async ({ body, ack, client, logger }) => {
     await ack();
 
-    const userId = (body.user || {}).id;
-    // Skip if user is not a member of the tickets channel
-    if (!isTicketChannelMember(userId)) {
-        logger.info(`User ${userId} tried to resolve a ticket but is not in the tickets channel`);
-        return;
-    }
+    try {
+        const userId = (body.user || {}).id;
+        logger.info(`[mark_resolved] User ${userId} clicked Mark Resolved button`);
+        
+        // Skip if user is not a member of the tickets channel
+        if (!isTicketChannelMember(userId)) {
+            logger.warn(`[mark_resolved] User ${userId} is not in tickets channel, aborting`);
+            return;
+        }
 
-    const ticketTs = (body as any).message?.ts;
-    if (!ticketTs) return;
+        const ticketTs = (body as any).message?.ts;
+        if (!ticketTs) {
+            logger.error(`[mark_resolved] No ticket timestamp found in message`);
+            return;
+        }
 
-    const success = await resolveTicket(ticketTs, userId, client, logger);
-    if (success) {
-        logger.info(`Ticket ${ticketTs} marked as resolved (deleted) by ${userId}`);
+        logger.info(`[mark_resolved] Attempting to resolve ticket ${ticketTs}`);
+        const success = await resolveTicket(ticketTs, userId, client, logger);
+        if (success) {
+            logger.info(`[mark_resolved] SUCCESS: Ticket ${ticketTs} marked as resolved by ${userId}`);
+        } else {
+            logger.error(`[mark_resolved] FAILED: Ticket ${ticketTs} could not be resolved`);
+        }
+    } catch (error) {
+        logger.error(`[mark_resolved] Unexpected error:`, error);
     }
 });
 
