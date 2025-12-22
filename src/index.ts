@@ -330,6 +330,17 @@ async function resolveTicket(ticketTs: string, resolver: string, client, logger,
                     thread_ts: ticket.originalTs,
                     text: `:white_check_mark: This ticket has been marked as resolved. Please send a new message in <#${HELP_CHANNEL}> to create a new ticket if you have another question. ${ai ? "" : "You're welcome to continue asking follow-up questions in this thread!"}`
                 });
+                
+                // Add a checkmark reaction to the original message
+                try {
+                    await client.reactions.add({
+                        name: "white_check_mark",
+                        timestamp: ticket.originalTs,
+                        channel: ticket.originalChannel,
+                    });
+                } catch (error) {
+                    logger.warn(`Failed to add reaction to original message:`, error);
+                }
             }
         } catch (error) {
             logger.warn(`Failed to check original message for ticket ${ticketTs}:`, error);
