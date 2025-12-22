@@ -393,6 +393,11 @@ app.event('message', async ({ event, client, logger }) => {
         channel: event.channel,
         thread_ts: event.ts,
         text: `:rac_woah: woah... a new ticket?? someone will be here to help you soon... make sure to read the <https://hackclub.enterprise.slack.com/docs/T0266FRGM/F09LT3JBG3C|FAQ> to see if it answers your question!`
+    });
+    await client.chat.postMessage({
+        channel: event.channel,
+        thread_ts: event.ts,
+        text: `if you have discovered the solution to your issue, react with a :white_tick: (white_tick) to mark it as solved!`
     })
 });
 
