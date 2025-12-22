@@ -8,7 +8,7 @@ dotenv.config();
 // Define channel IDs from env vars
 const HELP_CHANNEL = process.env.HELP_CHANNEL!;
 const TICKETS_CHANNEL = process.env.TICKETS_CHANNEL!;
-const DATA_FILE_PATH = path.join(__dirname, 'ticket-data.json');
+const DATA_FILE_PATH = path.join('/app/data', 'ticket-data.json');
 
 // In-memory mapping of ticket message IDs to original message info
 interface TicketInfo {
