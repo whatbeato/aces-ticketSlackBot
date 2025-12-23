@@ -410,6 +410,12 @@ app.event('message', async ({ event, client, logger }) => {
         message.text = "[Image/File uploaded]";
     }
     
+    // Skip messages that start with :thread: emoji
+    if (message.text && message.text.trim().startsWith(':thread:')) {
+        logger.info(`Skipping ticket creation for message starting with :thread: emoji`);
+        return;
+    }
+    
     await createTicket(message, client, logger);
     // send message
     await client.chat.postMessage({
