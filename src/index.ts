@@ -41,6 +41,16 @@ const tickets: Record<string, TicketInfo> = {};
 // Additional map to quickly look up tickets by original message timestamp
 const ticketsByOriginalTs: Record<string, string> = {};
 
+// Track recent tickets per user for duplicate detection
+interface RecentTicket {
+    userId: string;
+    originalTs: string;
+    originalChannel: string;
+    timestamp: number;
+}
+let recentUserTickets: RecentTicket[] = [];
+const DUPLICATE_WINDOW_MS = 30 * 1000; // 30 seconds
+
 // Historical tracking for leaderboards
 let lbForToday: LBEntry[] = [];
 let ticketResolutions: TicketResolution[] = [];
@@ -416,6 +426,32 @@ app.event('message', async ({ event, client, logger }) => {
         return;
     }
     
+    // Check for recent ticket from same user (within 30 seconds)
+    const now = Date.now();
+    // Clean up old entries
+    recentUserTickets = recentUserTickets.filter(t => now - t.timestamp < DUPLICATE_WINDOW_MS);
+    
+    const recentTicket = recentUserTickets.find(t => t.userId === message.user);
+    
+    if (recentTicket) {
+        // User has a recent ticket - post a reminder in the first ticket's thread
+        const newMessageLink = `https://${process.env.SLACK_WORKSPACE_DOMAIN || 'yourworkspace.slack.com'}.slack.com/archives/${message.channel}/p${formatTs(message.ts)}`;
+        
+        await client.chat.postMessage({
+            channel: recentTicket.originalChannel,
+            thread_ts: recentTicket.originalTs,
+            text: `:link: possibly related message: <${newMessageLink}|view message> _(unthreaded - please remember to thread your messages!)_`
+        });
+    }
+    
+    // Track this ticket for duplicate detection
+    recentUserTickets.push({
+        userId: message.user,
+        originalTs: message.ts,
+        originalChannel: message.channel,
+        timestamp: now
+    });
+    
     await createTicket(message, client, logger);
     // send message
     await client.chat.postMessage({
@@ -547,12 +583,6 @@ app.action('assign_user', async ({ body, ack, client, logger }) => {
 app.event('reaction_added', async ({ event, client, logger }) => {
     const reactionEvent = event as ReactionEvent;
 
-    // Skip if user is not a member of the tickets channel
-    if (!isTicketChannelMember(reactionEvent.user)) {
-        logger.info(`User ${reactionEvent.user} tried to resolve a ticket via reaction but is not in the tickets channel`);
-        return;
-    }
-
     // Check for the check mark reaction in the help channel
     if (reactionEvent.reaction === 'white_check_mark' && reactionEvent.item.channel === HELP_CHANNEL) {
         // Get the ticket by its original timestamp
@@ -575,22 +605,18 @@ app.event('reaction_added', async ({ event, client, logger }) => {
                 messageInfo.messages[0] &&
                 messageInfo.messages[0].user === reactionEvent.user;
 
-            if (isOriginalAuthor || isTicketChannelMember(reactionEvent.user)) {
+            const isTicketChannelUser = isTicketChannelMember(reactionEvent.user);
+
+            // Only allow original author OR ticket channel members to resolve
+            if (isOriginalAuthor || isTicketChannelUser) {
                 const success = await resolveTicket(ticket.ticketMessageTs, reactionEvent.user, client, logger);
                 if (success) {
                     logger.info(`Ticket resolved via reaction by ${reactionEvent.user} (${isOriginalAuthor ? 'original author' : 'support team member'})`);
-                    try {
-                        client.reactions.add({
-                            name: "white_check_mark",
-                            timestamp: reactionEvent.item.ts,
-                            channel: reactionEvent.item.channel,
-                        });
-                    } catch (error) {
-                        logger.error("Error adding reaction:", error);
-                    }
+                    // Don't add reaction if the user already added it
+                    // (the reaction that triggered this event)
                 }
             } else {
-                logger.info(`User ${reactionEvent.user} tried to resolve a ticket via reaction but is not authorized`);
+                logger.info(`User ${reactionEvent.user} tried to resolve a ticket via reaction but is not authorized (not original author and not in tickets channel)`);
             }
         } catch (error) {
             logger.error("Error checking message author:", error);
