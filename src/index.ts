@@ -434,7 +434,7 @@ app.event('message', async ({ event, client, logger }) => {
     const recentTicket = recentUserTickets.find(t => t.userId === message.user);
     
     if (recentTicket) {
-        // User has a recent ticket - post a reminder in the first ticket's thread
+        // User has a recent ticket - post a reminder in the first ticket's thread and skip creating a new ticket
         const newMessageLink = `https://${process.env.SLACK_WORKSPACE_DOMAIN || 'yourworkspace.slack.com'}.slack.com/archives/${message.channel}/p${formatTs(message.ts)}`;
         
         await client.chat.postMessage({
@@ -442,6 +442,7 @@ app.event('message', async ({ event, client, logger }) => {
             thread_ts: recentTicket.originalTs,
             text: `:link: possibly related message: <${newMessageLink}|view message> _(unthreaded - please remember to thread your messages!)_`
         });
+        return; // Don't create a new ticket for the second message
     }
     
     // Track this ticket for duplicate detection
